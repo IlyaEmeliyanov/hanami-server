@@ -1,5 +1,4 @@
 
-
 from wa.webapi import Server
 
 def main():
