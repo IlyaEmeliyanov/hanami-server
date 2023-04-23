@@ -1,10 +1,12 @@
 
 # Importing modules
 from flask import Flask, request
+from flask_cors import CORS, cross_origin
 from pymongo import *
 from dotenv import load_dotenv
 import certifi # import this module if having TLS certificate issues
 
+import json
 from bson.json_util import dumps
 
 from os import getenv
@@ -20,6 +22,7 @@ class Server:
     def run(self):
         # @GET requests
         @self.app.route("/")
+        @cross_origin()
         def dishes():
             collection = self.db["dishes"]
             obj = []
@@ -28,6 +31,7 @@ class Server:
             return dumps(obj)
         
         @self.app.route("/drinks")
+        @cross_origin()
         def drinks():
             collection = self.db["drinks"]
             obj = []
@@ -36,6 +40,7 @@ class Server:
             return dumps(obj)
             
         @self.app.route("/beers")
+        @cross_origin()
         def beers():
             collection = self.db["beers"]
             obj = []
@@ -44,6 +49,7 @@ class Server:
             return dumps(obj)
         
         @self.app.route("/desserts")
+        @cross_origin()
         def desserts():
             collection = self.db["desserts"]
             obj = []
@@ -52,15 +58,41 @@ class Server:
             return dumps(obj)
 
         @self.app.route("/menu")
+        @cross_origin()
         def menu():
             collection = self.db["menu"]
+            categories = [
+                "antipasti", "bowl", "degustazione", "frittura",
+                "futomaki", "gunkan", "gyoza", "hanami special roll",
+                "hosomaki", "insalate", "maki fritto", "menu cena",
+                "nigiri", "onigiri", "primi", "riso", "sushi misto",
+                "tartare e sashimi", "tataki", "temaki", "teppanyaki",
+                "uramaki", "zuppe", "sushi gio"
+            ]
             obj = []
-            for item in collection.find():
-                obj.append(item)
+            
+            for category in categories:
+                item = collection.aggregate(
+                [
+                    { "$lookup": {
+                        "from": "dishes",
+                        "localField": f"dishes.{category}", # Works with an array
+                        "pipeline": [{
+                            "$sort": { "dish": 1 },
+                        }],
+                        "foreignField": "_id",
+                        "as": "menu" },
+                    },
+                ])
+
+                item_dict = json.loads(dumps(item))[0]["menu"]
+                obj.append({category: item_dict})
+
             return dumps(obj)
         
         # @POST requests
         @self.app.route("/order", methods=["POST"])
+        @cross_origin()
         def order():
             if request.method == "POST":
                 json_content = request.get_json() # json_content = {data: {table: 3, dish: "001", qty: 3}}
@@ -90,7 +122,7 @@ class Server:
         self.app = Flask(__name__)
 
         # Web scraper config
-        self.WS_URL = getenv("WS_URL")
-        self.ws = WebScraper(self.WS_URL)
+        # self.WS_URL = getenv("WS_URL")
+        # self.ws = WebScraper(self.WS_URL)
 
         
