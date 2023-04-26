@@ -11,6 +11,12 @@ from bson.json_util import dumps
 
 from os import getenv
 
+# Importing queue module
+from queue import Queue
+
+# Importing order module
+from wa.order import Order
+
 # Importing ws
 from ws.webscraper import WebScraper
 
@@ -19,74 +25,94 @@ class Server:
         # Config server settings
         self.config()
 
+    def find_by_collection(self, collection_name) -> list: # returns all the elements in selected collection
+        items = []
+        for item in self.db[collection_name].find():
+            items.append(item)
+        return dumps(items) # convert to JSON format
+
     def run(self):
         # @GET requests
         @self.app.route("/")
         @cross_origin()
         def dishes():
-            collection = self.db["dishes"]
-            obj = []
-            for item in collection.find():
-                obj.append(item)
-            return dumps(obj)
+            return self.find_by_collection("dishes")
         
         @self.app.route("/drinks")
         @cross_origin()
         def drinks():
-            collection = self.db["drinks"]
-            obj = []
-            for item in collection.find():
-                obj.append(item)
-            return dumps(obj)
+            return self.find_by_collection("drinks")
             
         @self.app.route("/beers")
         @cross_origin()
         def beers():
-            collection = self.db["beers"]
-            obj = []
-            for item in collection.find():
-                obj.append(item)
-            return dumps(obj)
+            return self.find_by_collection("beers")
         
         @self.app.route("/desserts")
         @cross_origin()
         def desserts():
-            collection = self.db["desserts"]
-            obj = []
-            for item in collection.find():
-                obj.append(item)
-            return dumps(obj)
+            return self.find_by_collection("desserts")
+        
+        @self.app.route("/wines")
+        @cross_origin()
+        def wines():
+            return self.find_by_collection("wines")
+        
+        @self.app.route("/tables")
+        @cross_origin()
+        def tables():
+            return self.find_by_collection("tables")
 
         @self.app.route("/menu")
         @cross_origin()
         def menu():
-            collection = self.db["menu"]
-            categories = [
-                "antipasti", "bowl", "degustazione", "frittura",
+            db_collection = self.db["menu"]
+
+            collections = [
+                {
+                    "title": "desserts",
+                    "sections": []
+                },
+                {
+                    "title": "dishes",
+                    "sections": ["antipasti", "bowl", "degustazione", "frittura",
                 "futomaki", "gunkan", "gyoza", "hanami special roll",
                 "hosomaki", "insalate", "maki fritto", "menu cena",
                 "nigiri", "onigiri", "primi", "riso", "sushi misto",
                 "tartare e sashimi", "tataki", "temaki", "teppanyaki",
-                "uramaki", "zuppe", "sushi gio"
+                "uramaki", "zuppe", "sushi gio"]
+                },
+                {
+                    "title": "drinks",
+                    "sections": []
+                },
+                {
+                    "title": "wines",
+                    "sections": ["bianchi", "bollicine", "rosati", "rossi"]
+                }
             ]
-            obj = []
-            
-            for category in categories:
-                item = collection.aggregate(
-                [
-                    { "$lookup": {
-                        "from": "dishes",
-                        "localField": f"dishes.{category}", # Works with an array
-                        "pipeline": [{
-                            "$sort": { "dish": 1 },
-                        }],
-                        "foreignField": "_id",
-                        "as": "menu" },
-                    },
-                ])
 
-                item_dict = json.loads(dumps(item))[0]["menu"]
-                obj.append({category: item_dict})
+            obj = {}
+            
+            for collection in collections:
+                title, sections = collection.values()
+                
+                section_obj = {}
+                for section in sections:
+                    item = db_collection.aggregate([
+                        { "$lookup": {
+                            "from": title,
+                            "localField": f"{title}.{section}", # Works with an array
+                            # "pipeline": [{
+                            #     "$sort": { "dish": 1 },
+                            # }],
+                            "foreignField": "_id",
+                            "as": "menu" },
+                        },
+                    ])
+                    section_obj[section] = json.loads(dumps(item))[0]["menu"]
+
+                obj[title] = section_obj
 
             return dumps(obj)
         
@@ -95,10 +121,15 @@ class Server:
         @cross_origin()
         def order():
             if request.method == "POST":
-                json_content = request.get_json() # json_content = {data: {table: 3, dish: "001", qty: 3}}
                 try: # handling exception in case of ws failure
-                    self.ws.login("a", "a")
-                    self.ws.process(json_content['data']) # processing the order: table=3, dish="001", qty=3
+                    json_data = request.get_json()["data"] # json_data = {"table": 3, "dishes": [{"dish": "1", "qty": 1}]}
+                    table, dishes = json_data.values() # getting the data from json
+                    self.enqueue_order(table, dishes) # enqueuing the newly received order in the queue
+
+                    self.print_queues()
+
+                    # self.ws.login("a", "a")
+                    # self.ws.process(json_content['data']) # processing the order: table=3, dish="001", qty=3
                 except Exception as exception:
                     print(f"\n[❌] Something went wrong: {exception}")
                     
@@ -108,6 +139,7 @@ class Server:
     
     def config(self):
         load_dotenv() # loading environment variables
+
         DB_USERNAME = getenv('DB_USERNAME')
         DB_PASSWORD = getenv('DB_PASSWORD')
         DB_CLUSTER = getenv('DB_CLUSTER')
@@ -121,8 +153,51 @@ class Server:
         self.PORT = getenv('PORT')
         self.app = Flask(__name__)
 
+        # Configuring the queues for processing orders
+        self.MAX_DISHES = int(getenv('MAX_DISHES'))
+        self.create_queues()
+
         # Web scraper config
         # self.WS_URL = getenv("WS_URL")
         # self.ws = WebScraper(self.WS_URL)
+
+
+    # Queues utils
+    def create_queues(self):
+        table_list = json.loads(self.find_by_collection("tables"))
+        self.queues = []
+        for table in table_list:
+            # i-th table -> (i-1)-th queue
+            self.queues.append(Queue(table["count"]*self.MAX_DISHES)) # setting the max count of the queues based on the number of people
+
+    def enqueue_order(self, table, dishes):
+        q = self.queues[table-1]
+        first_time = q.empty() # checking if it's the first time you're enqueuing
+        if not q.full():
+            q.put(Order(table, dishes)) # insert order in the correct queue
+            if first_time:
+                # Start the timer
+                pass
+            elif q.full():
+                # Dequeue dell'ordine, reset del timer, print comanda
+                pass
+            else:
+                # Restart the timer
+                pass
+
+
+
+        else:
+            print("[💡] Queue is full")
+
+    def print_queue(self, q):
+        print("[ ", end=' ')
+        for q_item in q.queue:
+            print(q_item, end=' <- ')
+        print(" ]")
+
+    def print_queues(self):
+        for q in self.queues:
+            self.print_queue(q)
 
         

@@ -52,12 +52,11 @@ class WebScraper(object):
         # table = data['table']
         # dish = data['dish']
         # qty = data['qty']
-        table, dish, qty = data.values() # shorter and cooler 😎
+        table, dish = data.values() # shorter and cooler 😎
         # IVANO, STAY HYDRATED 💧
 
         print("TABLE=", table)
         print("DISH=", dish)
-        print("QUANTITY=", qty)
 
         try:
             time.sleep(1)
@@ -79,10 +78,11 @@ class WebScraper(object):
             time.sleep(2) # Make sure all the elements of the page load properly
             # Fill search text field with the dish number
             search_input_dish = self.driver.find_element(By.ID, "search")
-            search_input_dish.send_keys(dish)
-            for _ in range(qty):
-                time.sleep(0.5)
-                search_input_dish.send_keys(Keys.RETURN)
+            for dish_data in data["dishes"]:
+                search_input_dish.send_keys(dish_data["dish"])
+                for _ in range(dish_data["qty"]):
+                    time.sleep(0.5)
+                    search_input_dish.send_keys(Keys.RETURN)
 
             time.sleep(0.5) # Make sure all the elements of the page load properly
             xpath_submit_button = "//div[contains(@id, 'mfooter')]//div//ul[contains(@class, 'ui-grid-b')]//ul[contains(@class, 'ui-block-c ui-grid-c')]//li[contains(@class, 'ui-block-d')]//a"
