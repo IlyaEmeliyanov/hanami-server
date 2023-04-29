@@ -1,203 +1,212 @@
 
 # Importing modules
-from flask import Flask, request
-from flask_cors import CORS, cross_origin
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from pymongo import *
 from dotenv import load_dotenv
 import certifi # import this module if having TLS certificate issues
 
 import json
 from bson.json_util import dumps
+import operator
 
 from os import getenv
 
 # Importing queue module
-from queue import Queue
+from wa.queue import TimerQueue
 
 # Importing order module
-from wa.order import Order
+from wa.order import OrderType, Order
 
 # Importing ws
 from ws.webscraper import WebScraper
 
-class Server:
-    def __init__(self) -> None:
-        # Config server settings
-        self.config()
+load_dotenv() # loading environment variables
 
-    def find_by_collection(self, collection_name) -> list: # returns all the elements in selected collection
-        items = []
-        for item in self.db[collection_name].find():
-            items.append(item)
-        return dumps(items) # convert to JSON format
-
-    def run(self):
-        # @GET requests
-        @self.app.route("/")
-        @cross_origin()
-        def dishes():
-            return self.find_by_collection("dishes")
-        
-        @self.app.route("/drinks")
-        @cross_origin()
-        def drinks():
-            return self.find_by_collection("drinks")
-            
-        @self.app.route("/beers")
-        @cross_origin()
-        def beers():
-            return self.find_by_collection("beers")
-        
-        @self.app.route("/desserts")
-        @cross_origin()
-        def desserts():
-            return self.find_by_collection("desserts")
-        
-        @self.app.route("/wines")
-        @cross_origin()
-        def wines():
-            return self.find_by_collection("wines")
-        
-        @self.app.route("/tables")
-        @cross_origin()
-        def tables():
-            return self.find_by_collection("tables")
-
-        @self.app.route("/menu")
-        @cross_origin()
-        def menu():
-            db_collection = self.db["menu"]
-
-            collections = [
-                {
-                    "title": "desserts",
-                    "sections": []
-                },
-                {
-                    "title": "dishes",
-                    "sections": ["antipasti", "bowl", "degustazione", "frittura",
-                "futomaki", "gunkan", "gyoza", "hanami special roll",
-                "hosomaki", "insalate", "maki fritto", "menu cena",
-                "nigiri", "onigiri", "primi", "riso", "sushi misto",
-                "tartare e sashimi", "tataki", "temaki", "teppanyaki",
-                "uramaki", "zuppe", "sushi gio"]
-                },
-                {
-                    "title": "drinks",
-                    "sections": []
-                },
-                {
-                    "title": "wines",
-                    "sections": ["bianchi", "bollicine", "rosati", "rossi"]
-                }
-            ]
-
-            obj = {}
-            
-            for collection in collections:
-                title, sections = collection.values()
-                
-                section_obj = {}
-                for section in sections:
-                    item = db_collection.aggregate([
-                        { "$lookup": {
-                            "from": title,
-                            "localField": f"{title}.{section}", # Works with an array
-                            # "pipeline": [{
-                            #     "$sort": { "dish": 1 },
-                            # }],
-                            "foreignField": "_id",
-                            "as": "menu" },
-                        },
-                    ])
-                    section_obj[section] = json.loads(dumps(item))[0]["menu"]
-
-                obj[title] = section_obj
-
-            return dumps(obj)
-        
-        # @POST requests
-        @self.app.route("/order", methods=["POST"])
-        @cross_origin()
-        def order():
-            if request.method == "POST":
-                try: # handling exception in case of ws failure
-                    json_data = request.get_json()["data"] # json_data = {"table": 3, "dishes": [{"dish": "1", "qty": 1}]}
-                    table, dishes = json_data.values() # getting the data from json
-                    self.enqueue_order(table, dishes) # enqueuing the newly received order in the queue
-
-                    self.print_queues()
-
-                    # self.ws.login("a", "a")
-                    # self.ws.process(json_content['data']) # processing the order: table=3, dish="001", qty=3
-                except Exception as exception:
-                    print(f"\n[❌] Something went wrong: {exception}")
-                    
-            return dumps({"status": "success", "statusCode": 201})
-
-        self.app.run(port=self.PORT)
-    
-    def config(self):
-        load_dotenv() # loading environment variables
-
-        DB_USERNAME = getenv('DB_USERNAME')
-        DB_PASSWORD = getenv('DB_PASSWORD')
-        DB_CLUSTER = getenv('DB_CLUSTER')
-        COLLECTION_NAME = getenv('COLLECTION_NAME')
-
-        # Database config
-        client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority", tlsCAFile=certifi.where())
-        self.db = client[COLLECTION_NAME]
-
-        # Web server with flask
-        self.PORT = getenv('PORT')
-        self.app = Flask(__name__)
-
-        # Configuring the queues for processing orders
-        self.MAX_DISHES = int(getenv('MAX_DISHES'))
-        self.create_queues()
-
-        # Web scraper config
-        # self.WS_URL = getenv("WS_URL")
-        # self.ws = WebScraper(self.WS_URL)
+DB_USERNAME = getenv('DB_USERNAME')
+DB_PASSWORD = getenv('DB_PASSWORD')
+DB_CLUSTER = getenv('DB_CLUSTER')
+COLLECTION_NAME = getenv('COLLECTION_NAME')
+SERVER_URL = getenv('SERVER_URL')
+SERVER_PORT = getenv('SERVER_PORT')
+WS_URL = getenv("WS_URL")
+WS_USERNAME = getenv("WS_USERNAME")
+WS_PASSWORD = getenv("WS_PASSWORD")
 
 
-    # Queues utils
-    def create_queues(self):
-        table_list = json.loads(self.find_by_collection("tables"))
-        self.queues = []
-        for table in table_list:
-            # i-th table -> (i-1)-th queue
-            self.queues.append(Queue(table["count"]*self.MAX_DISHES)) # setting the max count of the queues based on the number of people
+# Database config
+client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority", tlsCAFile=certifi.where())
+db = client[COLLECTION_NAME]
 
-    def enqueue_order(self, table, dishes):
-        q = self.queues[table-1]
-        first_time = q.empty() # checking if it's the first time you're enqueuing
-        if not q.full():
-            q.put(Order(table, dishes)) # insert order in the correct queue
+# Setting up the server
+app = FastAPI()
+# Configuring web server for CORS
+origins = [
+"http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Web scraper config
+# ws = WebScraper(WS_URL)
+# ws.login(WS_USERNAME, WS_PASSWORD)
+
+# Returns serealized JSON from db
+def find_by_collection(collection_name): # returns all the elements in selected collection
+    items = []
+    for item in db[collection_name].find():
+        items.append(item)
+    return items
+
+def response(items):
+    return JSONResponse(content=json.loads(dumps(items)))
+
+# Queues utils
+def create_queues() -> list:
+    table_list = find_by_collection("tables")
+    queues = []
+    table_list.sort(key=operator.itemgetter('number')) # sort the table list by ID
+    for table in table_list:
+        # i-th table -> (i-1)-th queue
+        # queues.append(TimerQueue(table["number"], 5, table["count"]*MAX_DISHES)) # setting the max count of the queues based on the number of people
+        queues.append(TimerQueue(id=table["number"], delay=20, size=3)) # setting the max count of the queues based on the number of people
+    return queues
+
+def print_queues():
+    for queue in queues:
+        print(queue)
+
+def enqueue_order(table, dishes, background_tasks):
+    queue = queues[table-1]
+    first_time = queue.empty() # checking if it's the first time you're enqueuing
+    if not queue.full():
+        print_queues()
+        try: # handling exception in case of ws failure
+            queue.put(Order(table, dishes)) # insert order in the correct queue
             if first_time:
-                # Start the timer
-                pass
-            elif q.full():
-                # Dequeue dell'ordine, reset del timer, print comanda
-                pass
+                print("[🏀] EMPTY: Queue is empty")
+                # If it is the first order inserted in the queue, then start the timer
+                background_tasks.add_task(queue.start_timer)
+            elif queue.full(): # check if the newly inserted order fullfills the queue
+                print("[💡] FULL: Queue is full")
+                # 1. Dequeue dell'ordine
+                while not queue.empty():
+                    queue.get() # !PLACEHOLDER: REPLACE WITH THE NEXT LINE
+                    # background_tasks.add_task(ws.process, queue, table, dishes) # 2. Print comanda
+                    # ? BOH: queue.task_done() # mark the task as done
+                queue.cancel_timer() # 3. Reset del timer
             else:
+                print("[⏳] SEMI-FULL: Queue contains some elements")
                 # Restart the timer
+                queue.cancel_timer()
+                background_tasks.add_task(queue.start_timer)
                 pass
+        except Exception as exception:
+            print(f"\n[❌] Something went wrong: {exception}")
+    else:
+        enqueue_order(table, dishes, background_tasks)
+        print("[💡] Queue is full")
 
+def dequeue_order(queue, table):
+    if not queue.empty():
+        queue.get()
 
+# Configuring the queues for processing orders
+MAX_DISHES = int(getenv('MAX_DISHES'))
+queues = create_queues()
 
-        else:
-            print("[💡] Queue is full")
+# @GET requests
+@app.get("/")
+async def dishes():
+    return response(find_by_collection("dishes"))
 
-    def print_queue(self, q):
-        print("[ ", end=' ')
-        for q_item in q.queue:
-            print(q_item, end=' <- ')
-        print(" ]")
+@app.get("/drinks")
+def drinks():
+    return response(find_by_collection("drinks"))
+    
+@app.get("/beers")
+def beers():
+    return response(find_by_collection("beers"))
 
-    def print_queues(self):
-        for q in self.queues:
-            self.print_queue(q)
+@app.get("/desserts")
+def desserts():
+    return response(find_by_collection("desserts"))
 
+@app.get("/wines")
+def wines():
+    return response(find_by_collection("wines"))
+
+@app.get("/tables")
+def tables():
+    return response(find_by_collection("tables"))
+
+@app.get("/menu")
+async def menu():
+    db_collection = db["menu"]
+
+    collections = [
+        {
+            "title": "desserts",
+            "sections": []
+        },
+        {
+            "title": "dishes",
+            "sections": ["antipasti", "bowl", "degustazione", "frittura",
+        "futomaki", "gunkan", "gyoza", "hanami special roll",
+        "hosomaki", "insalate", "maki fritto", "menu cena",
+        "nigiri", "onigiri", "primi", "riso", "sushi misto",
+        "tartare e sashimi", "tataki", "temaki", "teppanyaki",
+        "uramaki", "zuppe", "sushi gio"]
+        },
+        {
+            "title": "drinks",
+            "sections": []
+        },
+        {
+            "title": "wines",
+            "sections": ["bianchi", "bollicine", "rosati", "rossi"]
+        }
+    ]
+
+    obj = {}
+    
+    for collection in collections:
+        title, sections = collection.values()
         
+        section_obj = {}
+        for section in sections:
+            item = db_collection.aggregate([
+                { "$lookup": {
+                    "from": title,
+                    "localField": f"{title}.{section}", # Works with an array
+                    # "pipeline": [{
+                    #     "$sort": { "dish": 1 },
+                    # }],
+                    "foreignField": "_id",
+                    "as": "menu" },
+                },
+            ])
+            section_obj[section] = json.loads(dumps(item))[0]["menu"]
+
+        obj[title] = section_obj
+
+    return response(obj)
+    
+# @POST requests
+@app.post("/order")
+def order(order: OrderType, background_tasks: BackgroundTasks):
+    try: # handling exception in case of ws failure
+        enqueue_order(order.table, order.dishes, background_tasks) # enqueuing the newly received order in the queue
+        return response({"status": "success", "statusCode": 201})
+    except Exception as exception:
+        print(f"\n[❌] Something went wrong: {exception}")
+        return response({"status": "failure", "statusCode": 400})
+            

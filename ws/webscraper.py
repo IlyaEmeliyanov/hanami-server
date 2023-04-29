@@ -48,15 +48,11 @@ class WebScraper(object):
         submit_button.click()
 
 
-    def process(self, data):
-        # table = data['table']
-        # dish = data['dish']
-        # qty = data['qty']
-        table, dish = data.values() # shorter and cooler 😎
+    def process(self, queue, table, dishes):
         # IVANO, STAY HYDRATED 💧
 
         print("TABLE=", table)
-        print("DISH=", dish)
+        print("DISH=", dishes)
 
         try:
             time.sleep(1)
@@ -78,7 +74,7 @@ class WebScraper(object):
             time.sleep(2) # Make sure all the elements of the page load properly
             # Fill search text field with the dish number
             search_input_dish = self.driver.find_element(By.ID, "search")
-            for dish_data in data["dishes"]:
+            for dish_data in dishes:
                 search_input_dish.send_keys(dish_data["dish"])
                 for _ in range(dish_data["qty"]):
                     time.sleep(0.5)
@@ -94,5 +90,10 @@ class WebScraper(object):
                 complete_button = self.driver.find_element(By.XPATH, xpath_complete_button)
                 complete_button.click()
                 time.sleep(0.5)
+        except Exception as exception:
+            print(f"\n[❌] Something went wrong: {exception}")
+
+        try: # trying to deque the last order
+            queue.get() 
         except Exception as exception:
             print(f"\n[❌] Something went wrong: {exception}")
