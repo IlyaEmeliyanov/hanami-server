@@ -66,6 +66,7 @@ class WebScraper(object):
                     if table_item.value_of_css_property("bakground-color") == "#66D972":
                         table_state = True
 
+
             # Fill search text field with the table number
             search_input = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.ID, "search")))
             search_input.send_keys(table) # send the table's number
@@ -93,7 +94,7 @@ class WebScraper(object):
                     complete_button = self.driver.find_element(By.XPATH, xpath_complete_button)
                     complete_button.click()
                 except NoSuchElementException:
-                    print("[ERROR]: Element doesn't exist")
+                    print("L\'elemento non esiste")
         except Exception as exception:
             print(f"\n[❌] Something went wrong: {exception}")
 

@@ -4,9 +4,7 @@ from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-import asyncio
-
-from pymongo import MongoClient
+from pymongo import *
 from dotenv import load_dotenv
 import certifi # import this module if having TLS certificate issues
 
@@ -20,7 +18,7 @@ from os import getenv
 from wa.queue import TimerQueue
 
 # Importing order module
-from wa.order import OrderType
+from wa.order import OrderType, Order
 
 # Importing ws
 from ws.webscraper import WebScraper
@@ -39,7 +37,7 @@ WS_PASSWORD = getenv("WS_PASSWORD")
 
 
 # Database config
-client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority", tlsCAFile=certifi.where())
+client = MongoClient(f"mongodb://localhost:27017", tlsCAFile=certifi.where())
 db = client[COLLECTION_NAME]
 
 # Setting up the server
@@ -58,8 +56,8 @@ app.add_middleware(
 )
 
 # Web scraper config
-# ws = WebScraper(WS_URL)
-# ws.login(WS_USERNAME, WS_PASSWORD)
+ws = WebScraper(WS_URL)
+ws.login(WS_USERNAME, WS_PASSWORD)
 
 # Returns serealized JSON from db
 def find_by_collection(collection_name): # returns all the elements in selected collection
@@ -79,8 +77,58 @@ def create_queues() -> list:
     for table in table_list:
         # i-th table -> (i-1)-th queue
         # queues.append(TimerQueue(table["number"], 5, table["count"]*MAX_DISHES)) # setting the max count of the queues based on the number of people
-        queues.append(TimerQueue(id=table["number"], delay=20, size=3)) # setting the max count of the queues based on the number of people
+        queues.append(TimerQueue(id=table["number"], delay=15, size=2)) # setting the max count of the queues based on the number of people
     return queues
+
+def print_queues():
+    for queue in queues:
+        print(queue)
+
+def enqueue_order(table, dishes, background_tasks):
+    queue = queues[table-1]
+    first_time = queue.empty() # checking if it's the first time you're enqueuing
+    if not queue.full():
+        try: # handling exception in case of ws failure
+            queue.put(Order(table, dishes)) # insert order in the correct queue
+            print_queues()
+            if first_time:
+                print("[🏀] FIRST TIME: First item inserted in queue")
+                # If it is the first order inserted in the queue, then start the timer
+                background_tasks.add_task(queue.start_timer)
+                print("[LOG]: Timer starte succesfully")
+            elif queue.full(): # check if the newly inserted order fullfills the queue
+                print("[💡] FULL: Queue is full")
+                # 1. Dequeue dell'ordine
+                #while not queue.empty():
+                print("Ivano hydrated")
+                    # queue.get() # !PLACEHOLDER: REPLACE WITH THE NEXT LINE
+                    # ws.process(queue, table, dishes)
+                print(queue.queue)
+                background_tasks.add_task(ws.process, table, list(queue.queue)) # 2. Print comanda
+                    # ? BOH: queue.task_done() # mark the task as done
+                queue.cancel_timer() # 3. Reset del timer
+
+                try: # trying to deque the last order
+                    with queue.mutex:
+                        queue.queue.clear()
+                    print(f"[LOG]: Queue {queue.id} cleared")
+                except Exception as exception:
+                    print(f"\n[❌] Something went wrong: {exception}")
+            else:
+                print("[⏳] SEMI-FULL: Queue contains some elements")
+                # Restart the timer
+                #queue.cancel_timer()
+                #background_tasks.add_task(queue.start_timer)
+                pass
+        except Exception as exception:
+            print(f"\n[❌] Something went wrong: {exception}")
+    else:
+        # enqueue_order(table, dishes, background_tasks)
+        print("[💡] Queue is full")
+
+def dequeue_order(queue, table):
+    if not queue.empty():
+        queue.get()
 
 # Configuring the queues for processing orders
 MAX_DISHES = int(getenv('MAX_DISHES'))
@@ -167,8 +215,7 @@ async def menu():
 @app.post("/order")
 def order(order: OrderType, background_tasks: BackgroundTasks):
     try: # handling exception in case of ws failure
-        queue = queues[order.table-1] # find the corresponding queue
-        queue.enqueue_order(order, background_tasks) # enqueuing the newly received order in the queue
+        enqueue_order(order.table, order.dishes, background_tasks) # enqueuing the newly received order in the queue
         return response({"status": "success", "statusCode": 201})
     except Exception as exception:
         print(f"\n[❌] Something went wrong: {exception}")
