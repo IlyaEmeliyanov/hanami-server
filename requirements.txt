@@ -1,8 +1,0 @@
-uvicorn
-selenium
-pymongo
-bson
-fastapi
-webdriver-manager
-python-dotenv
-certifi
