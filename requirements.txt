@@ -1,0 +1,7 @@
+uvicorn
+selenium
+pymongo
+fastapi
+webdriver-manager
+python-dotenv
+certifi

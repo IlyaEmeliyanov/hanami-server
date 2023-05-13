@@ -1,0 +1,6 @@
+env/*
+.env
+ws/__pycache__
+ws/webscraper_new
+wa/__pycache__
+wa/webapi_new
