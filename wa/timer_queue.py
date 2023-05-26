@@ -1,8 +1,7 @@
 
 import asyncio
 from queue import Queue
-from multiprocessing import Process
-from threading import Timer
+
 
 class TimerQueue(Queue):
     def __init__(self, id, delay, size, ws):
@@ -17,6 +16,7 @@ class TimerQueue(Queue):
         self.is_completed = False
 
         self.ws = ws
+
 
     def __str__(self):
         q_str = ""
@@ -59,17 +59,9 @@ class TimerQueue(Queue):
 
                     # self.restart_timer()
             except Exception as exception:
-                print(f"\n[❌] Something went wrong: {exception}")
+                print(f"\n[ERROR] Something went wrong in enqueue_order: {exception}")
         else:
             print("[💡] Queue is full")
-
-    def complex_task(self, dishes):
-        print("[LOG]: Dishes ", dishes)
-        timer = Timer(10, self.callback)
-        timer.start()
-
-    def callback(self):
-        print("[LOG]: Complex task finished")
 
     def dequeue_all(self):
         with self.mutex:
@@ -83,20 +75,10 @@ class TimerQueue(Queue):
 
         print("ORDERS: ", self.orders)
 
-        complex_process = Process(target=self.complex_task, args=(self.orders,))
-        complex_process.start()
-
-        # try:
-        #     ws_process = Process(target=self.complex_task, args=(self.orders))
-        #     ws_process.start()
-        # except Exception as exception:
-        #     print("[ERROR]: something went wrong in task_done ", exception)
-
-        # try:
-        #     self.ws.run(self.id, self.orders)
-        #     # self.ws.run(self.table, self.orders)
-        # except Exception as exception:
-        #     print("[ERROR]: Something went wrong in task_done: ", exception)
+        try:
+            self.ws.run(self.id, self.orders)
+        except Exception as exception:
+            print("[ERROR]: Something went wrong in task_done: ", exception)
 
     async def start_timer(self):
         print(f"[LOG]: STARTED, Timer {self.id} started")

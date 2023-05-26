@@ -8,13 +8,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 
 from webdriver_manager.chrome import ChromeDriverManager
 
 import time
 
-from threading import Thread, Timer
 from multiprocessing import Process
+from queue import Queue
 
 # Creating and configuring the class for WebScraper
 # Pattern used: singleton
@@ -23,7 +24,9 @@ class WebScraper(object):
         self.config(url)
         self.table = ""
         self.orders = []
-        self.ws_process = Process(target=self.process)
+        self.is_completed = False
+        self.ws_process = None
+        self.process_queue = Queue()
         print("Connected to: ", self.URL)
 
     def __new__(cls, url): # used for creating a unique instance of a class
@@ -31,28 +34,100 @@ class WebScraper(object):
             cls.instance = super(WebScraper, cls).__new__(cls)
         return cls.instance
 
+    def get_chrome_options(self) -> Options:
+        """Sets chrome options for Selenium.
+        Chrome options for headless browser is enabled.
+        """
+        chrome_options = Options()
+        chrome_options.add_experimental_option("detach", True)
+        # chrome_options.add_argument("--headless")
+        # chrome_options.add_argument("--no-sandbox")
+        # chrome_options.add_argument("--disable-dev-shm-usage")
+        # chrome_prefs = {}
+        # chrome_options.experimental_options["prefs"] = chrome_prefs
+        # chrome_prefs["profile.default_content_settings"] = {"images": 2}
+        return chrome_options
+
+    def run(self, table, orders):
+        self.process_queue.put({"table": table, "orders": orders})
+        if self.ws_process is None or not self.ws_process.is_alive(): # process_queue is empty
+            self.ws_process = Process(target=self.process_debug)
+            self.ws_process.start()
+        else: # process_queue is already processing an order
+            print("[LOG] Processing ...")
+
+
     def config(self, url):
         self.URL = url
         
-        options = Options()
-        options.add_experimental_option("detach", True)
-
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        # driver = webdriver.Remote("http://selenium:4444/wd/hub", desired_capabilities=DesiredCapabilities.CHROME)
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.get_chrome_options())
 
         driver.get(self.URL)
         driver.maximize_window()
 
         self.driver = driver
 
-    def run(self, table, orders):
-        self.table = table
-        self.orders = orders
-        if self.ws_process.is_alive():
-            self.ws_process.join() # wait until the previous order was printed
-        else:
-            self.ws_process = Process(target=self.process)
+    def login_debug(self, username, password):
+
+        print("[LOG] Login in MERIN")
+
+        username_input = self.driver.find_element(By.CLASS_NAME, "username")
+        password_input = self.driver.find_element(By.CLASS_NAME, "password")
+        submit_button = self.driver.find_element(By.CLASS_NAME, "login__btn")
+
+        username_input.send_keys(username)
+        password_input.send_keys(password)
+
+        submit_button.click()
+
+    def process_debug(self):
+
+        print("[LOG] Start processing MERIN")
+
+        table, orders = self.process_queue.get().values()
+
+        try:
+            time.sleep(1)
+
+            table_input = self.driver.find_element(By.CLASS_NAME, "table")
+            table_input.send_keys(table)
+
+            time.sleep(1)
+
+            dish_input = self.driver.find_element(By.CLASS_NAME, "dish")
+            enter_button = self.driver.find_element(By.CLASS_NAME, "enter__btn")
+
+            for order in orders:
+                dish_input.send_keys(order)
+                time.sleep(0.5)
+                enter_button.click()
+                dish_input.clear()
+                time.sleep(0.5)
+
+            time.sleep(2)
+
+            table_input.clear()
+            dish_input.clear()
+
+            submit_button = self.driver.find_element(By.CLASS_NAME, "order__btn")
+            submit_button.click()
+
+            time.sleep(1)
+
+        except Exception as exception:
+            print(f"[ERROR] Something went wrong in process_debug {exception}")
+
+        self.is_completed = True
+
+        # get from process_queue and recursive call to process_debug
+        if not self.process_queue.empty():
+            print("BLABLBALBALBALBAL")
+            self.is_completed = False
+            self.ws_process = Process(target=self.process_debug)
             self.ws_process.start()
-            self.ws_process.join()
+
+        print("[LOG] End processing MERIN")
 
     def login(self, username, password):
         username_input = self.driver.find_element(By.ID, "lbName")
@@ -63,7 +138,6 @@ class WebScraper(object):
         password_input.send_keys(password)
 
         submit_button.click()
-
 
     def process(self):
         # IVANO, STAY HYDRATED 💧
@@ -79,7 +153,7 @@ class WebScraper(object):
             table_state = False
             for table_item in table_elements:
                 if table_item.get_attribute("innerHTML") == self.table:
-                    if table_item.value_of_css_property("bakground-color") == "#66D972":
+                    if table_item.value_of_css_property("background-color") == "#66D972":
                         table_state = True
 
             # Fill search text field with the table number
@@ -108,6 +182,8 @@ class WebScraper(object):
                 except NoSuchElementException:
                     print("[ERROR]: Element doesn't exist")
         except Exception as exception:
-            print(f"\n[❌] Something went wrong: {exception}")
+            print(f"\n[ERROR] Something went wrong in process: {exception}")
+
+        self.is_completed = True
 
         

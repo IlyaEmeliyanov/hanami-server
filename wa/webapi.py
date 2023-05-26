@@ -31,8 +31,8 @@ class WebAPI:
         COLLECTION_NAME = getenv('COLLECTION_NAME')
 
         # Database config
-        # client = MongoClient("localhost", 27017)
-        # self.db = client["hanami"]
+        client = MongoClient("localhost", 27017)
+        self.db = client["hanami"]
         client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority",
                              tlsCAFile=certifi.where())
         self.db = client[COLLECTION_NAME]
@@ -61,13 +61,13 @@ class WebAPI:
         self.WS_USERNAME = getenv("WS_USERNAME")
         self.WS_PASSWORD = getenv("WS_PASSWORD")
 
+        # Web scraper config
+        self.ws = WebScraper(self.WS_URL)
+        self.ws.login_debug(self.WS_USERNAME, self.WS_PASSWORD)
+
         # Queues config | queues are used to control the orders
         self.MAX_DISHES = int(getenv('MAX_DISHES'))
         self.queues = self.create_queues()
-
-        # Web scraper config
-        # ws = WebScraper(WS_URL)
-        # ws.login(WS_USERNAME, WS_PASSWORD)
 
     # @GET requests
     async def get_items_by_collection(self, request: Request):
@@ -147,7 +147,7 @@ class WebAPI:
             queue.enqueue_order(order, background_tasks)  # enqueuing the newly received order in the queue
             return self.response({"status": "success", "statusCode": 201})
         except Exception as exception:
-            print(f"\n[❌] Something went wrong: {exception}")
+            print(f"\n[ERROR] Something went wrong in post_order: {exception}")
             return self.response({"status": "failure", "statusCode": 400})
 
     # @UTIL functions
@@ -172,9 +172,9 @@ class WebAPI:
             # i-th table -> (i-1)-th queue
             # queues.append(TimerQueue(table["number"], 5, table["count"]*MAX_DISHES)) # setting the max count of the queues based on the number of people
 
-            queues.append(TimerQueue(id=table["number"], delay=5, size=3,
-                                     ws=None))  # setting the max count of the queues based on the number of people
-            # queues.append(TimerQueue(id=table["number"], delay=5, size=3, ws=ws)) # setting the max count of the queues based on the number of people
+            # queues.append(TimerQueue(id=table["number"], delay=5, size=3,
+            #                          ws=None))  # setting the max count of the queues based on the number of people
+            queues.append(TimerQueue(id=table["number"], delay=20, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
         return queues
 
 
