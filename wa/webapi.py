@@ -174,7 +174,7 @@ class WebAPI:
 
             # queues.append(TimerQueue(id=table["number"], delay=5, size=3,
             #                          ws=None))  # setting the max count of the queues based on the number of people
-            queues.append(TimerQueue(id=table["number"], delay=20, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
+            queues.append(TimerQueue(id=table["number"], delay=10, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
         return queues
 
 

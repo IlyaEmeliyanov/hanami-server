@@ -14,8 +14,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 import time
 
-from multiprocessing import Process
-from queue import Queue
+from multiprocessing import Process, Queue as ProcessQueue
 
 # Creating and configuring the class for WebScraper
 # Pattern used: singleton
@@ -24,10 +23,9 @@ class WebScraper(object):
         self.config(url)
         self.table = ""
         self.orders = []
-        self.is_completed = False
         self.ws_process = None
-        self.process_queue = Queue()
-        print("Connected to: ", self.URL)
+        self.process_queue = ProcessQueue()
+        print("[LOG] Connected to webscraper source: ", self.URL)
 
     def __new__(cls, url): # used for creating a unique instance of a class
         if not hasattr(cls, 'instance'):
@@ -51,10 +49,10 @@ class WebScraper(object):
     def run(self, table, orders):
         self.process_queue.put({"table": table, "orders": orders})
         if self.ws_process is None or not self.ws_process.is_alive(): # process_queue is empty
-            self.ws_process = Process(target=self.process_debug)
+            self.ws_process = Process(target=self.process_debug, args=(self.process_queue, ))
             self.ws_process.start()
         else: # process_queue is already processing an order
-            print("[LOG] Processing ...")
+            print(f"[LOG] Processing another order")
 
 
     def config(self, url):
@@ -81,11 +79,14 @@ class WebScraper(object):
 
         submit_button.click()
 
-    def process_debug(self):
+    def process_debug(self, process_queue):
+
+        if process_queue.empty():
+            print("[WARNING] process_queue is empty")
+            return
 
         print("[LOG] Start processing MERIN")
-
-        table, orders = self.process_queue.get().values()
+        table, orders = process_queue.get().values()
 
         try:
             time.sleep(1)
@@ -118,72 +119,70 @@ class WebScraper(object):
         except Exception as exception:
             print(f"[ERROR] Something went wrong in process_debug {exception}")
 
-        self.is_completed = True
+        self.process_queue.get()
 
-        # get from process_queue and recursive call to process_debug
+        # Recursive call to process_debug
         if not self.process_queue.empty():
-            print("BLABLBALBALBALBAL")
-            self.is_completed = False
-            self.ws_process = Process(target=self.process_debug)
+            self.ws_process = Process(target=self.process_debug, args=(self.process_queue, ))
             self.ws_process.start()
+        else:
+            print("[LOG] End processing MERIN")
 
-        print("[LOG] End processing MERIN")
-
-    def login(self, username, password):
-        username_input = self.driver.find_element(By.ID, "lbName")
-        password_input = self.driver.find_element(By.ID, "lbPad")
-        submit_button = self.driver.find_element(By.XPATH, "//div[contains(@class, 'ui-btn ui-input-btn ui-shadow')]//input")
-
-        username_input.send_keys(username)
-        password_input.send_keys(password)
-
-        submit_button.click()
-
-    def process(self):
-        # IVANO, STAY HYDRATED 💧
-
-        print("TABLE=", self.table)
-        print("DISH=", self.orders)
-
-        try:
-            time.sleep(1)
-            # Get all tables
-            xpath_table_item = "//div//ul[contains(@class, 'ui-listview')]//li//a[contains(@class, 'ui-btn')]"
-            table_elements = self.driver.find_elements(By.XPATH, xpath_table_item)
-            table_state = False
-            for table_item in table_elements:
-                if table_item.get_attribute("innerHTML") == self.table:
-                    if table_item.value_of_css_property("background-color") == "#66D972":
-                        table_state = True
-
-            # Fill search text field with the table number
-            search_input = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.ID, "search")))
-            search_input.send_keys(self.table) # send the table's number
-            search_input.send_keys(Keys.RETURN) # hitting return for selecting the table
-
-            time.sleep(2) # Make sure all the elements of the page load properly
-            # Fill search text field with the dish number
-            search_input_dish = self.driver.find_element(By.ID, "search")
-            for order in self.orders:
-                search_input_dish.send_keys(order)
-                search_input_dish.send_keys(Keys.RETURN)
-                
-            time.sleep(0.5) # Make sure all the elements of the page load properly
-            xpath_submit_button = "//div[contains(@id, 'mfooter')]//div//ul[contains(@class, 'ui-grid-b')]//ul[contains(@class, 'ui-block-c ui-grid-c')]//li[contains(@class, 'ui-block-d')]//a"
-            submit_button = self.driver.find_element(By.XPATH, xpath_submit_button)
-            time.sleep(0.5)
-            submit_button.click()
-            if table_state == False:
-                time.sleep(1)
-                try:
-                    xpath_complete_button = "//div[contains(@class, 'ui-controlgroup-controls')]//a"
-                    complete_button = self.driver.find_element(By.XPATH, xpath_complete_button)
-                    complete_button.click()
-                except NoSuchElementException:
-                    print("[ERROR]: Element doesn't exist")
-        except Exception as exception:
-            print(f"\n[ERROR] Something went wrong in process: {exception}")
-
-        self.is_completed = True
+    # def login(self, username, password):
+    #     username_input = self.driver.find_element(By.ID, "lbName")
+    #     password_input = self.driver.find_element(By.ID, "lbPad")
+    #     submit_button = self.driver.find_element(By.XPATH, "//div[contains(@class, 'ui-btn ui-input-btn ui-shadow')]//input")
+    #
+    #     username_input.send_keys(username)
+    #     password_input.send_keys(password)
+    #
+    #     submit_button.click()
+    #
+    # def process(self):
+    #     # IVANO, STAY HYDRATED 💧
+    #
+    #     print("TABLE=", self.table)
+    #     print("DISH=", self.orders)
+    #
+    #     try:
+    #         time.sleep(1)
+    #         # Get all tables
+    #         xpath_table_item = "//div//ul[contains(@class, 'ui-listview')]//li//a[contains(@class, 'ui-btn')]"
+    #         table_elements = self.driver.find_elements(By.XPATH, xpath_table_item)
+    #         table_state = False
+    #         for table_item in table_elements:
+    #             if table_item.get_attribute("innerHTML") == self.table:
+    #                 if table_item.value_of_css_property("background-color") == "#66D972":
+    #                     table_state = True
+    #
+    #         # Fill search text field with the table number
+    #         search_input = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.ID, "search")))
+    #         search_input.send_keys(self.table) # send the table's number
+    #         search_input.send_keys(Keys.RETURN) # hitting return for selecting the table
+    #
+    #         time.sleep(2) # Make sure all the elements of the page load properly
+    #         # Fill search text field with the dish number
+    #         search_input_dish = self.driver.find_element(By.ID, "search")
+    #         for order in self.orders:
+    #             search_input_dish.send_keys(order)
+    #             search_input_dish.send_keys(Keys.RETURN)
+    #
+    #         time.sleep(0.5) # Make sure all the elements of the page load properly
+    #         xpath_submit_button = "//div[contains(@id, 'mfooter')]//div//ul[contains(@class, 'ui-grid-b')]//ul[contains(@class, 'ui-block-c ui-grid-c')]//li[contains(@class, 'ui-block-d')]//a"
+    #         submit_button = self.driver.find_element(By.XPATH, xpath_submit_button)
+    #         time.sleep(0.5)
+    #         submit_button.click()
+    #         if table_state == False:
+    #             time.sleep(1)
+    #             try:
+    #                 xpath_complete_button = "//div[contains(@class, 'ui-controlgroup-controls')]//a"
+    #                 complete_button = self.driver.find_element(By.XPATH, xpath_complete_button)
+    #                 complete_button.click()
+    #             except NoSuchElementException:
+    #                 print("[ERROR]: Element doesn't exist")
+    #     except Exception as exception:
+    #         print(f"\n[ERROR] Something went wrong in process: {exception}")
+    #
+    #     self.is_completed = True
 
         
