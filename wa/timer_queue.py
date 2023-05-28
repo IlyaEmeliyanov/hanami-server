@@ -33,7 +33,6 @@ class TimerQueue(Queue):
     def restart_timer(self):
         self.counter = self.delay
         self.background_tasks.add_task(self.start_timer)
-        logging.log(msg="")
         print(f"[LOG]: Timer {self.id} reset")
 
     def enqueue_order(self, order, background_tasks):

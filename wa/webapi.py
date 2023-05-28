@@ -33,9 +33,9 @@ class WebAPI:
         # Database config
         client = MongoClient("localhost", 27017)
         self.db = client["hanami"]
-        client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority",
-                             tlsCAFile=certifi.where())
-        self.db = client[COLLECTION_NAME]
+        # client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority",
+        #                      tlsCAFile=certifi.where())
+        # self.db = client[COLLECTION_NAME]
 
         self.SERVER_URL = getenv('SERVER_URL')
         self.SERVER_PORT = getenv('SERVER_PORT')
@@ -63,7 +63,7 @@ class WebAPI:
 
         # Web scraper config
         self.ws = WebScraper(self.WS_URL)
-        self.ws.login_debug(self.WS_USERNAME, self.WS_PASSWORD)
+        self.ws.login(self.WS_USERNAME, self.WS_PASSWORD)
 
         # Queues config | queues are used to control the orders
         self.MAX_DISHES = int(getenv('MAX_DISHES'))
