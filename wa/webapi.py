@@ -17,7 +17,7 @@ from os import getenv
 # Importing custom modules
 from ws.webscraper import WebScraper
 from wa.timer_queue import TimerQueue
-from wa.order import OrderType
+from wa.order import OrderType, TimerType
 
 class WebAPI:
     def __init__(self):
@@ -31,11 +31,11 @@ class WebAPI:
         COLLECTION_NAME = getenv('COLLECTION_NAME')
 
         # Database config
-        client = MongoClient("localhost", 27017)
-        self.db = client["hanami"]
-        # client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority",
-        #                      tlsCAFile=certifi.where())
-        # self.db = client[COLLECTION_NAME]
+        # client = MongoClient("localhost", 27017)
+        # self.db = client["hanami"]
+        client = MongoClient(f"mongodb+srv://{DB_USERNAME}:{DB_PASSWORD}@{DB_CLUSTER}/?retryWrites=true&w=majority",
+                             tlsCAFile=certifi.where())
+        self.db = client[COLLECTION_NAME]
 
         self.SERVER_URL = getenv('SERVER_URL')
         self.SERVER_PORT = getenv('SERVER_PORT')
@@ -49,6 +49,7 @@ class WebAPI:
             {"pathname": "wines", "method": self.get_items_by_collection, "request_type": "GET"},
             {"pathname": "tables", "method": self.get_items_by_collection, "request_type": "GET"},
             {"pathname": "menu", "method": self.get_menu, "request_type": "GET"},
+            {"pathname": "timer", "method": self.get_timer, "request_type": "POST"},
             {"pathname": "order", "method": self.post_order, "request_type": "POST"}
         ]
         for route in routes:
@@ -141,14 +142,32 @@ class WebAPI:
         return self.response(obj)
 
     # @POST requests
+    # @POST request
+    # body: { "table": "<table_number>", dishes: [{"dish": <dish_number>, "quantity": <dish_quantity>} ...] }
+    # Description: enqueues the order in the corresponding queue
     async def post_order(self, order: OrderType, background_tasks: BackgroundTasks):
         try:  # handling exception in case of ws failure
-            queue = self.queues[order.table - 1]  # find the corresponding queue
+            # Find the corresponding queue
+            queue = None
+            for q in self.queues:
+                if q.table_number == order.table: queue = q
             queue.enqueue_order(order, background_tasks)  # enqueuing the newly received order in the queue
             return self.response({"status": "success", "statusCode": 201})
         except Exception as exception:
             print(f"\n[ERROR] Something went wrong in post_order: {exception}")
             return self.response({"status": "failure", "statusCode": 400})
+
+    # @POST request
+    # body: { "table": "<table_number>" }
+    # Description: requests the current counter of the timer from a specific queue
+    async def get_timer(self, timer: TimerType):
+        # Find the corresponding queue
+        queue = None
+        for q in self.queues:
+            if q.table_number == timer.table: queue = q
+        print(queue)
+        queue_counter = queue.get_cur_time()
+        return self.response({"status": "success", "statusCode": 200, "counter": queue_counter})
 
     # @UTIL functions
     # Returns serialized JSON from db
@@ -168,13 +187,9 @@ class WebAPI:
         table_list = self.find_by_collection("tables")
         queues = []
         table_list.sort(key=operator.itemgetter('number'))  # sort the table list by ID
-        for table in table_list:
-            # i-th table -> (i-1)-th queue
-            # queues.append(TimerQueue(table["number"], 5, table["count"]*MAX_DISHES)) # setting the max count of the queues based on the number of people
-
-            # queues.append(TimerQueue(id=table["number"], delay=5, size=3,
-            #                          ws=None))  # setting the max count of the queues based on the number of people
-            queues.append(TimerQueue(id=table["number"], delay=10, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
+        for i, table in enumerate(table_list):
+            # Append each queue to the array of queues
+            queues.append(TimerQueue(id=i, table_number=table["number"], delay=10, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
         return queues
 
 
