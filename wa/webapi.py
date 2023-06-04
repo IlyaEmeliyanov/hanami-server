@@ -151,6 +151,10 @@ class WebAPI:
             queue = None
             for q in self.queues:
                 if q.table_number == order.table: queue = q
+
+            if queue.client_timer is not None:
+                if queue.client_timer.get_remaining_time() != -1:
+                    return self.response({"status": "success", "statusCode": "200", "message": "You cannot order before the timer finishes"})
             queue.enqueue_order(order, background_tasks)  # enqueuing the newly received order in the queue
             return self.response({"status": "success", "statusCode": 201})
         except Exception as exception:
@@ -166,18 +170,20 @@ class WebAPI:
         for q in self.queues:
             if q.table_number == timer.table: queue = q
         print(queue)
-        queue_counter = queue.get_cur_time()
+
+        queue_counter = queue.client_timer.get_remaining_time() if queue.client_timer is not None else 0
         return self.response({"status": "success", "statusCode": 200, "counter": queue_counter})
 
     # @UTIL functions
-    # Returns serialized JSON from db
+
+    # Returns data from specific collection
     def find_by_collection(self, collection_name):  # returns all the elements in selected collection
         items = []
         for item in self.db[collection_name].find():
             items.append(item)
         return items
 
-
+    # Returns serialized JSON obj
     def response(self, items):
         return JSONResponse(content=json.loads(dumps(items)))
 
@@ -189,7 +195,7 @@ class WebAPI:
         table_list.sort(key=operator.itemgetter('number'))  # sort the table list by ID
         for i, table in enumerate(table_list):
             # Append each queue to the array of queues
-            queues.append(TimerQueue(id=i, table_number=table["number"], delay=10, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
+            queues.append(TimerQueue(id=i, table_number=table["number"], delay=10, waiting_delay=20, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
         return queues
 
 

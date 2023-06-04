@@ -120,12 +120,10 @@ class WebScraper(object):
 
         # self.process_queue.get()
 
-        print(self.process_queue.empty())
-
         # Recursive call to process
-        if not self.process_queue.empty():
+        if not process_queue.empty():
             print("BLABLABLA")
-            self.ws_process = Process(target=self.process, args=(self.process_queue, ))
+            self.ws_process = Process(target=self.process, args=(process_queue, ))
             self.ws_process.start()
         else:
             print("[LOG] End processing MERIN")

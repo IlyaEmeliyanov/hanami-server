@@ -1,4 +1,4 @@
-import uvicorn # for startint the ASGI server
+import uvicorn # for starting the ASGI server
 from threading import Thread
 import subprocess
 
