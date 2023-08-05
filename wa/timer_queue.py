@@ -38,16 +38,19 @@ class TimerQueue(Queue):
             try: # handling exception in case of ws failure
                 for dish in order.dishes:
                     for _ in range(dish["quantity"]):
-                        self.put(dish["dish"]) # insert order in the correct queue
+                        self.put_nowait(dish["dish"]) # insert order in the correct queue
+
+                # ERROR!!!
+                print("BRUHHH")
                 self.orders = list(self.queue)
-                
+
                 if first_time:
                     print(f"[LOG]: First element added to {self.table_number}")
                     print(self)
 
                     self.timer.start() # Start the timer on the first enqueued order
 
-                elif self.full(): # check if the newly inserted order fullfills the queue
+                elif self.full(): # check if the newly inserted order fulfills the queue
                     print(f"[LOG]: Queue {self.table_number} is full")
                     print(self)
 
@@ -68,6 +71,7 @@ class TimerQueue(Queue):
         with self.mutex:
             self.queue.clear()
             print(f"[LOG]: Queue {self.table_number} cleared")
+            print(self)
 
     # Callback called when either one of the 2 conditions happen:
     # - Queue timer finishes

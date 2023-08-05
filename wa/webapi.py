@@ -50,7 +50,8 @@ class WebAPI:
             {"pathname": "tables", "method": self.get_items_by_collection, "request_type": "GET"},
             {"pathname": "menu", "method": self.get_menu, "request_type": "GET"},
             {"pathname": "timer", "method": self.get_timer, "request_type": "POST"},
-            {"pathname": "order", "method": self.post_order, "request_type": "POST"}
+            {"pathname": "order", "method": self.post_order, "request_type": "POST"},
+            {"pathname": "drinks", "method": self.post_drinks, "request_type": "POST"}
         ]
         for route in routes:
             pathname = route["pathname"]
@@ -68,7 +69,9 @@ class WebAPI:
 
         # Queues config | queues are used to control the orders
         self.MAX_DISHES = int(getenv('MAX_DISHES'))
-        self.queues = self.create_queues()
+
+        self.queues = self.create_queues(delay=10, waiting_delay=30)
+        self.drink_queues = self.create_queues(delay=5, waiting_delay=10)
 
     # @GET requests
     async def get_items_by_collection(self, request: Request):
@@ -152,9 +155,31 @@ class WebAPI:
             for q in self.queues:
                 if q.table_number == order.table: queue = q
 
+            if queue is None: return self.response({"status": "failure", "statusCode": "400", "message": "Queue is not yet defined"})
+
             if queue.client_timer is not None:
                 if queue.client_timer.get_remaining_time() != -1:
                     return self.response({"status": "success", "statusCode": "200", "message": "You cannot order before the timer finishes"})
+            queue.enqueue_order(order, background_tasks)  # enqueuing the newly received order in the queue
+
+            return self.response({"status": "success", "statusCode": 201})
+        except Exception as exception:
+            print(f"\n[ERROR] Something went wrong in post_order: {exception}")
+            return self.response({"status": "failure", "statusCode": 400})
+
+    # @POST requests
+    # @POST request
+    async def post_drinks(self, order: OrderType, background_tasks: BackgroundTasks):
+        try:
+            # Find the corresponding queue
+            queue = None
+            for q in self.queues:
+                if q.table_number == order.table: queue = q
+
+            if queue.client_timer is not None:
+                if queue.client_timer.get_remaining_time() != -1:
+                    return self.response(
+                        {"status": "success", "statusCode": "200", "message": "You cannot order before the timer finishes"})
             queue.enqueue_order(order, background_tasks)  # enqueuing the newly received order in the queue
             return self.response({"status": "success", "statusCode": 201})
         except Exception as exception:
@@ -169,7 +194,8 @@ class WebAPI:
         queue = None
         for q in self.queues:
             if q.table_number == timer.table: queue = q
-        print(queue)
+
+        if queue is None: return # if queue is not found or not ready yet return
 
         queue_counter = queue.client_timer.get_remaining_time() if queue.client_timer is not None else 0
         return self.response({"status": "success", "statusCode": 200, "counter": queue_counter})
@@ -189,13 +215,13 @@ class WebAPI:
 
 
     # Queues utils
-    def create_queues(self) -> list:
+    def create_queues(self, delay, waiting_delay) -> list:
         table_list = self.find_by_collection("tables")
         queues = []
         table_list.sort(key=operator.itemgetter('number'))  # sort the table list by ID
         for i, table in enumerate(table_list):
             # Append each queue to the array of queues
-            queues.append(TimerQueue(id=i, table_number=table["number"], delay=10, waiting_delay=20, size=3, ws=self.ws)) # setting the max count of the queues based on the number of people
+            queues.append(TimerQueue(id=i, table_number=table["number"], delay=delay, waiting_delay=waiting_delay, size=self.MAX_DISHES*table["count"], ws=self.ws)) # setting the max count of the queues based on the number of people
         return queues
 
 

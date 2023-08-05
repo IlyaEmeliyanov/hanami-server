@@ -18,7 +18,7 @@ class Timer:
 
     def get_remaining_time(self):
         if self.timer is not None:
-            return f"{(self.interval - time.time() + self.start_time):.0f}"
+            return int(f"{(self.interval - time.time() + self.start_time):.0f}")
         return -1
 
     def start(self):
